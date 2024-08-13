@@ -9,97 +9,172 @@ public class PlayerController : MonoBehaviour
     public float moveSpeed;
     public float rotateSpeed;
     public float pushForce;
-    public bool isPushing = false;
     public VariableJoystick variableJoystick;
     public Animator animator;
     public bool isMoveUsingJoystick;
     public Transform playerHand;
     public Transform trolleyHandle;
+    public Transform playerTrolleyHolder;
+    public GameObject trolley;
+    public float offset;
+    public List<Animator> trolleyWheelAnims;
 
+    private Vector3 joyStickDirection;
+    public float idleTime = 0f;
+    public float detachTime = 5f;
+
+    public bool isHoldingTrolley = false;
+    public bool isPushing = false;
+    public bool isMoveWithTrolley, isDethached;
 
     private void FixedUpdate()
     {
-        if (Input.touchCount > 0 && !isMoveUsingJoystick)
+
+        if (isMoveUsingJoystick)
+        {
+            joyStickDirection = Vector3.forward * variableJoystick.Vertical + Vector3.right * variableJoystick.Horizontal;
+            joyStickDirection.Normalize();
+
+            MovePlayer(joyStickDirection);
+
+            if (joyStickDirection != Vector3.zero )
+            {
+                isMoveWithTrolley = true;
+                foreach (Animator anims in trolleyWheelAnims)
+                {
+                    anims.enabled = true;
+                }
+            }
+            else
+            {
+                isMoveWithTrolley = false;
+                DetachTrolley();
+                foreach(Animator anims in trolleyWheelAnims)
+                {
+                    anims.enabled = false;
+                }
+            }
+        }
+        
+        else if (Input.touchCount > 0)
         {
             Touch touch = Input.GetTouch(0);
             Vector3 touchPosition = Camera.main.ScreenToWorldPoint(new Vector3(touch.position.x, touch.position.y, Camera.main.nearClipPlane + 1f));
-
             Vector3 movement = new Vector3(touchPosition.x - transform.position.x, 0.0f, touchPosition.z - transform.position.z);
             movement = Vector3.ClampMagnitude(movement, 1.0f);
 
-            
-
-            // Rotate character to face the movement direction
-            if (movement != Vector3.zero)
-            {
-                playerRb.MovePosition(transform.position + movement * moveSpeed * Time.deltaTime);
-                Quaternion targetRotation = Quaternion.LookRotation(movement);
-                playerRb.MoveRotation(Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 10f));
-                animator.SetBool("isWalking", true);
-            }
-            else
-            {
-                animator.SetBool("isWalking", false);
-            }
+            MovePlayer(movement);
         }
-        else if (isMoveUsingJoystick)
+
+        if (isPushing)
         {
-            Vector3 direction = Vector3.forward * variableJoystick.Vertical + Vector3.right * variableJoystick.Horizontal;
-            direction.Normalize();
-
-            playerRb.MovePosition(transform.position + direction * moveSpeed * Time.fixedDeltaTime);
-            //transform.Translate(direction * moveSpeed * Time.fixedDeltaTime, Space.World);
-            if (direction != Vector3.zero)
-            {
-                Quaternion toRotation = Quaternion.LookRotation(direction, Vector3.up);
-                //transform.rotation = Quaternion.RotateTowards(transform.rotation, toRotation, rotateSpeed * Time.fixedDeltaTime);
-                playerRb.MoveRotation(Quaternion.Slerp(transform.rotation, toRotation, Time.fixedDeltaTime * 10f));
-                animator.SetBool("isWalking", true);
-                if (isPushing)
-                {
-                    animator.SetBool("isPushing", true);
-                    trolleyRb.gameObject.transform.SetParent(this.transform);
-                }
-                else
-                {
-                    animator.SetBool("isPushing", false);
-                    trolleyRb.gameObject.transform.SetParent(null);
-                }
-            }
-            else
-            {
-                animator.SetBool("isWalking", false);
-
-                animator.SetBool("isPushing", false);
-                isPushing = false;
-            }
-
+            trolley.transform.position = playerTrolleyHolder.position;
+            trolley.transform.rotation = playerTrolleyHolder.rotation;
         }
+        if (joyStickDirection == Vector3.zero)
+        {
+            DetachTrolley();
+        }
+        else
+        {
+            idleTime = 0f;
+        }
+    }
 
+    private void MovePlayer(Vector3 direction)
+    {
+        if (direction != Vector3.zero)
+        {
+            playerRb.MovePosition(transform.position + direction * moveSpeed * Time.deltaTime);
+            Quaternion targetRotation = Quaternion.LookRotation(direction);
+            playerRb.MoveRotation(Quaternion.Slerp(transform.rotation, targetRotation, rotateSpeed * Time.deltaTime));
+            animator.SetBool("isWalking", true);
+        }
+        else
+        {
+            animator.SetBool("isWalking", false);
+        }
+    }
+
+    private void MoveTrolley()
+    {
+        if (trolleyRb != null)
+        {
+            Vector3 targetPosition = playerTrolleyHolder.position;
+            trolleyRb.MovePosition(targetPosition);
+            Quaternion targetRotation = Quaternion.LookRotation(joyStickDirection);
+            trolleyRb.MoveRotation(Quaternion.RotateTowards(trolleyRb.rotation, targetRotation, rotateSpeed * Time.fixedDeltaTime));
+        }
+    }
+
+    public void AttachTrolley()
+    {
+        /*isHoldingTrolley = true;
+        isPushing = true;
+        trolley.transform.position = playerTrolleyHolder.position;
+        trolley.transform.rotation = playerTrolleyHolder.rotation;
+        trolley.transform.SetParent(transform);
+        animator.SetBool("isPushing", true);*/
+        if (!isDethached)
+        {
+            StartCoroutine(SmoothAttachTrolley());
+            animator.SetBool("isPushing", true);
+        }
+    }
+
+    private IEnumerator SmoothAttachTrolley()
+    {
+        float elapsedTime = 0f;
+        float attachDuration = 0.5f; 
+        Vector3 initialPosition = trolley.transform.position;
+        Quaternion initialRotation = trolley.transform.rotation;
+        trolley.transform.position = Vector3.Lerp(initialPosition, playerTrolleyHolder.position, elapsedTime / attachDuration);
+        trolley.transform.rotation = Quaternion.Slerp(initialRotation, playerTrolleyHolder.rotation, elapsedTime / attachDuration);
+
+        while (elapsedTime < attachDuration)
+        {
+            //trolley.transform.position = Vector3.Lerp(initialPosition, playerTrolleyHolder.position, elapsedTime / attachDuration);
+            //trolley.transform.rotation = Quaternion.Slerp(initialRotation, playerTrolleyHolder.rotation, elapsedTime / attachDuration);
+            elapsedTime += Time.deltaTime;
+            yield return null;
+        }
+        trolley.transform.position = playerTrolleyHolder.position;
+    }
+
+    public void DetachTrolley()         
+    {
+        isHoldingTrolley = false;
+        isPushing = false;
+        trolley.transform.SetParent(null);
+        animator.SetBool("isPushing", false);
+        idleTime = 0f;
+        moveSpeed = 0;
+        trolley.GetComponent<Rigidbody>().velocity = Vector3.zero;
+        StartCoroutine(ResetDethacHValue());
+    }
+
+    private IEnumerator ResetDethacHValue()
+    {
+        yield return new WaitForSeconds(0.2f);
+        moveSpeed = 2;
+        //trolley.GetComponent<Rigidbody>().velocity = Vector3.zero;
     }
 
     private void OnCollisionEnter(Collision collision)
     {
-        if (collision.gameObject.CompareTag("Trolley"))
+        if (collision.gameObject.CompareTag("Trolley") && isMoveWithTrolley)
         {
-            //trolleyHandle.position = playerHand.transform.position;
+            trolley = collision.gameObject;
+            AttachTrolley();
         }
     }
 
     private void OnCollisionStay(Collision collision)
     {
-        if (collision.gameObject.CompareTag("Trolley")) //
+        if (collision.gameObject.CompareTag("Trolley") && isMoveWithTrolley)
         {
-            isPushing = true;
-            if (isPushing)
-            {
-                
-                trolleyRb = collision.gameObject.GetComponent<Rigidbody>();
-
-                Vector3 pushDir = transform.forward;
-
-                trolleyRb.AddForce(pushDir * pushForce, ForceMode.Force);
-            }
+            AttachTrolley();
+            isDethached = false;
         }
     }
 
@@ -108,6 +183,8 @@ public class PlayerController : MonoBehaviour
         if (collision.gameObject.CompareTag("Trolley"))
         {
             isPushing = false;
+            isDethached = true;    
+            animator.SetBool("isPushing", false);
         }
     }
 }
